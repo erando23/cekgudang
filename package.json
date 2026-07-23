@@ -1,0 +1,28 @@
+{
+  "name": "cekgudang",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Aplikasi web responsif untuk cek stok gudang cafe berdasarkan `prd.md`.",
+  "main": "app.js",
+  "scripts": {
+    "test": "node test/security.test.js",
+    "test:integration": "node test/security.test.js --integration",
+    "start": "node server.js",
+    "db:studio": "drizzle-kit studio --config drizzle.config.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22 <25"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.17.3",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.10",
+    "drizzle-orm": "^0.45.2"
+  }
+}
