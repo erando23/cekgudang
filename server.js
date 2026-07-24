@@ -986,9 +986,10 @@ function serveStatic(response, pathname) {
 }
 
 async function main() {
-  await initDb();
+  const dbReady = initDb();
   const server = http.createServer(async (request, response) => {
     try {
+      await dbReady;
       setSecurityHeaders(response);
       const url = new URL(request.url, `http://${request.headers.host}`);
       if (url.pathname === "/health" && (request.method === "GET" || request.method === "HEAD")) {
@@ -1017,9 +1018,11 @@ async function main() {
   });
 
   server.listen(PORT, () => {
-    const mode = process.env.TURSO_DATABASE_URL ? "Turso/libSQL remote" : LOCAL_DB_URL;
-    console.log(`Cek Gudang running at http://localhost:${PORT}`);
-    console.log(`Database: ${mode}`);
+    dbReady.then(() => {
+      const mode = process.env.TURSO_DATABASE_URL ? "Turso/libSQL remote" : LOCAL_DB_URL;
+      console.log(`Cek Gudang running at http://localhost:${PORT}`);
+      console.log(`Database: ${mode}`);
+    }).catch(() => {});
   });
 
   let shuttingDown = false;
@@ -1035,6 +1038,7 @@ async function main() {
   };
   process.once("SIGTERM", () => shutdown("SIGTERM"));
   process.once("SIGINT", () => shutdown("SIGINT"));
+  await dbReady;
 }
 
 if (require.main === module) {
