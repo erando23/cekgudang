@@ -1,12 +1,7 @@
 {
   "functions": {
     "server.js": {
-      "includeFiles": [
-        "index.html",
-        "app.js",
-        "styles.css",
-        "template-nota-belanja.csv"
-      ]
+      "includeFiles": "*.{html,js,css,csv}"
     }
   }
 }
