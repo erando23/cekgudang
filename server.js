@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { createClient } = require("@libsql/client");
-const XLSX = require("xlsx");
+const ExcelJS = require("exceljs");
 
 const PORT = Number(process.env.PORT || 3000);
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
@@ -768,16 +768,18 @@ function sendExcelHead(response, filename, buffer) {
   response.end();
 }
 
-function createImportTemplate() {
-  const workbook = XLSX.utils.book_new();
+async function createImportTemplate() {
+  const workbook = new ExcelJS.Workbook();
   const rows = [
     ["Nama Barang", "Satuan", "Min Stok", "Stok Saat Ini", "Lokasi"],
     ["Saus Tare", "liter", 5, 12, "Gudang Utama"],
     ["Nori", "pack", 10, 25, "Freezer A"],
   ];
-  const sheet = XLSX.utils.aoa_to_sheet(rows);
-  sheet["!cols"] = [{ wch: 28 }, { wch: 14 }, { wch: 12 }, { wch: 16 }, { wch: 22 }];
-  XLSX.utils.book_append_sheet(workbook, sheet, "Template Barang");
+  const sheet = workbook.addWorksheet("Template Barang");
+  sheet.addRows(rows);
+  [28, 14, 12, 16, 22].forEach((width, index) => {
+    sheet.getColumn(index + 1).width = width;
+  });
 
   const locationRows = [
     ["Lokasi Penyimpanan Valid"],
@@ -786,11 +788,11 @@ function createImportTemplate() {
     ["Freezer B"],
     ["Freezer C"],
   ];
-  const locationSheet = XLSX.utils.aoa_to_sheet(locationRows);
-  locationSheet["!cols"] = [{ wch: 28 }];
-  XLSX.utils.book_append_sheet(workbook, locationSheet, "Referensi Lokasi");
+  const locationSheet = workbook.addWorksheet("Referensi Lokasi");
+  locationSheet.addRows(locationRows);
+  locationSheet.getColumn(1).width = 28;
 
-  return XLSX.write(workbook, { bookType: "xlsx", type: "buffer" });
+  return Buffer.from(await workbook.xlsx.writeBuffer());
 }
 
 function getExcelValue(row, names) {
@@ -800,11 +802,18 @@ function getExcelValue(row, names) {
 }
 
 async function previewExcelImport(buffer) {
-  const workbook = XLSX.read(buffer, { type: "buffer" });
-  const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+  const firstSheet = workbook.worksheets[0];
   if (!firstSheet) return [];
 
-  const rows = XLSX.utils.sheet_to_json(firstSheet, { defval: "" });
+  const headers = Array.from({ length: firstSheet.columnCount }, (_, index) => firstSheet.getRow(1).getCell(index + 1).text.trim());
+  const rows = [];
+  firstSheet.eachRow((row, rowNumber) => {
+    if (rowNumber === 1) return;
+    const values = Object.fromEntries(headers.map((header, index) => [header, row.getCell(index + 1).text.trim()]));
+    if (Object.values(values).some(Boolean)) rows.push(values);
+  });
   const state = await readState();
   const storageLocations = state.locations.filter((location) => location.type === "STORAGE");
   const seenNames = new Set();
@@ -845,7 +854,7 @@ async function previewExcelImport(buffer) {
 
 async function handleApi(request, response, pathname) {
   if (pathname === "/api/import-template" && (request.method === "GET" || request.method === "HEAD")) {
-    const template = createImportTemplate();
+    const template = await createImportTemplate();
     if (request.method === "HEAD") sendExcelHead(response, "template-master-barang.xlsx", template);
     else sendExcel(response, "template-master-barang.xlsx", template);
     return;
@@ -948,8 +957,8 @@ async function handleApi(request, response, pathname) {
   sendJson(response, 404, { error: "API route not found" });
 }
 
-function handleTemplateDownload(request, response) {
-  const template = createImportTemplate();
+async function handleTemplateDownload(request, response) {
+  const template = await createImportTemplate();
   if (request.method === "HEAD") sendExcelHead(response, "template-master-barang.xlsx", template);
   else sendExcel(response, "template-master-barang.xlsx", template);
 }
@@ -994,7 +1003,7 @@ async function main() {
         return;
       }
       if (url.pathname === "/template-master-barang.xlsx" && (request.method === "GET" || request.method === "HEAD")) {
-        handleTemplateDownload(request, response);
+        await handleTemplateDownload(request, response);
         return;
       }
       if (url.pathname.startsWith("/api/")) {

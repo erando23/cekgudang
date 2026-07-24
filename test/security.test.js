@@ -56,6 +56,16 @@ async function integrationChecks() {
 
   const adminLogin = await login(baseUrl, "erando23", process.env.TEST_ADMIN_PASSWORD || "erando23");
   assert.equal(adminLogin.response.status, 200);
+  const templateResponse = await fetch(`${baseUrl}/template-master-barang.xlsx`);
+  assert.equal(templateResponse.status, 200);
+  assert.match(String(templateResponse.headers.get("content-type")), /spreadsheetml/);
+  const previewResponse = await fetch(`${baseUrl}/api/import-preview`, {
+    method: "POST",
+    headers: { Cookie: adminLogin.cookie },
+    body: await templateResponse.arrayBuffer(),
+  });
+  assert.equal(previewResponse.status, 200);
+  assert.equal((await previewResponse.json()).rows.length, 2);
   const adminState = await (await fetch(`${baseUrl}/api/state`, { headers: { Cookie: adminLogin.cookie } })).json();
   assert.equal(adminState.users.some((user) => Object.hasOwn(user, "password")), false);
   console.log("HTTP integration checks passed.");
