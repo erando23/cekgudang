@@ -985,37 +985,41 @@ function serveStatic(response, pathname) {
   });
 }
 
-async function main() {
-  const dbReady = initDb();
-  const server = http.createServer(async (request, response) => {
-    try {
-      await dbReady;
-      setSecurityHeaders(response);
-      const url = new URL(request.url, `http://${request.headers.host}`);
-      if (url.pathname === "/health" && (request.method === "GET" || request.method === "HEAD")) {
-        try {
-          await db.execute("SELECT 1");
-          if (request.method === "HEAD") response.writeHead(200).end();
-          else sendJson(response, 200, { ok: true });
-        } catch {
-          if (request.method === "HEAD") response.writeHead(503).end();
-          else sendJson(response, 503, { ok: false });
-        }
-        return;
+let dbReady;
+const readyDb = () => (dbReady ||= initDb());
+
+const server = http.createServer(async (request, response) => {
+  try {
+    await readyDb();
+    setSecurityHeaders(response);
+    const url = new URL(request.url, `http://${request.headers.host}`);
+    if (url.pathname === "/health" && (request.method === "GET" || request.method === "HEAD")) {
+      try {
+        await db.execute("SELECT 1");
+        if (request.method === "HEAD") response.writeHead(200).end();
+        else sendJson(response, 200, { ok: true });
+      } catch {
+        if (request.method === "HEAD") response.writeHead(503).end();
+        else sendJson(response, 503, { ok: false });
       }
-      if (url.pathname === "/template-master-barang.xlsx" && (request.method === "GET" || request.method === "HEAD")) {
-        await handleTemplateDownload(request, response);
-        return;
-      }
-      if (url.pathname.startsWith("/api/")) {
-        await handleApi(request, response, url.pathname);
-        return;
-      }
-      serveStatic(response, url.pathname);
-    } catch (error) {
-      sendJson(response, 500, { error: error.message });
+      return;
     }
-  });
+    if (url.pathname === "/template-master-barang.xlsx" && (request.method === "GET" || request.method === "HEAD")) {
+      await handleTemplateDownload(request, response);
+      return;
+    }
+    if (url.pathname.startsWith("/api/")) {
+      await handleApi(request, response, url.pathname);
+      return;
+    }
+    serveStatic(response, url.pathname);
+  } catch (error) {
+    sendJson(response, 500, { error: error.message });
+  }
+});
+
+async function main() {
+  const dbReady = readyDb();
 
   server.listen(PORT, () => {
     dbReady.then(() => {
@@ -1048,4 +1052,5 @@ if (require.main === module) {
   });
 }
 
-module.exports = { assertStateRevision, createSessionToken, hashPassword, readSessionToken, verifyPassword };
+Object.assign(server, { assertStateRevision, createSessionToken, hashPassword, readSessionToken, verifyPassword });
+module.exports = server;
