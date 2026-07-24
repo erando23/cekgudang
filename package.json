@@ -3,7 +3,7 @@
   "version": "1.0.1",
   "private": true,
   "description": "Aplikasi web responsif untuk cek stok gudang cafe berdasarkan `prd.md`.",
-  "main": "app.js",
+  "main": "server.js",
   "scripts": {
     "test": "node test/security.test.js",
     "test:integration": "node test/security.test.js --integration",
