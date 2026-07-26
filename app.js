@@ -2734,7 +2734,6 @@ function stockText(products = activeProducts(), contextLabel = "") {
   if (contextLabel) lines.push(`Filter: ${contextLabel}`);
   lines.push("");
 
-  const visibleProductIds = new Set(products.map((product) => product.id));
   storageLocations().forEach((location) => {
     const productsInLocation = products.filter(
       (product) => product.locationId === location.id,
@@ -2743,25 +2742,10 @@ function stockText(products = activeProducts(), contextLabel = "") {
     lines.push(`${location.name}:`);
     productsInLocation.forEach((product) => {
       const quantity = stockFor(product.id, location.id);
-      const isLow = quantity <= Number(product.minStock);
-      lines.push(
-        `- ${product.name}: ${quantity} ${product.unit} (min ${product.minStock} ${product.unit}, ${isLow ? "Low" : "Aman"})`,
-      );
+      lines.push(`- ${product.name}: ${quantity} ${product.unit}`);
     });
     lines.push("");
   });
-
-  const low = activeProducts().filter(
-    (product) =>
-      visibleProductIds.has(product.id) && totalStock(product.id) <= product.minStock,
-  );
-  lines.push("Low Stock:");
-  if (!low.length) lines.push("- Tidak ada");
-  low.forEach((product) =>
-    lines.push(
-      `- ${product.name}: ${totalStock(product.id)} ${product.unit}, minimal ${product.minStock} ${product.unit}`,
-    ),
-  );
   return lines.join("\n");
 }
 
