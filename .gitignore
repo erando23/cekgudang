@@ -6,3 +6,5 @@ data/*.db
 data/*.db-*
 data/*.json
 npm-debug.log*
+
+.vercel
