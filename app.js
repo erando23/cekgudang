@@ -232,7 +232,7 @@ async function saveState(operation) {
     const snapshot = structuredClone(state);
     snapshot.operation = operation;
     const generation = stateGeneration;
-    const operation = saveQueue
+    const pendingSave = saveQueue
       .then(async () => {
         if (generation !== stateGeneration) return false;
         snapshot.revision = state.revision;
@@ -269,8 +269,8 @@ async function saveState(operation) {
         toast("Gagal menyimpan ke backend.");
         return false;
       });
-    saveQueue = operation;
-    return operation;
+    saveQueue = pendingSave;
+    return pendingSave;
   }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   return true;
