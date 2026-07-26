@@ -1,4 +1,6 @@
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const vm = require("node:vm");
 const { assertStateRevision, createSessionToken, hashPassword, readSessionToken, verifyPassword } = require("../server");
 
 (() => {
@@ -19,6 +21,34 @@ const { assertStateRevision, createSessionToken, hashPassword, readSessionToken,
   assert.throws(() => assertStateRevision(3, 4), { code: "STATE_CONFLICT" });
   console.log("Revision checks passed.");
 })();
+
+async function remoteSaveCheck(operation) {
+  const appSource = fs.readFileSync(require.resolve("../app.js"), "utf8");
+  const saveStateSource = appSource.match(/async function saveState\(operation\) \{[\s\S]*?(?=\nasync function hydrateStateFromBackend)/)?.[0];
+  assert.ok(saveStateSource, "saveState function must exist");
+  let requestBody;
+  const context = {
+    API_BASE: "/api",
+    state: { revision: 1 },
+    stateGeneration: 0,
+    saveQueue: Promise.resolve(true),
+    structuredClone,
+    fetch: async (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return { status: 200, ok: true, json: async () => ({ revision: 2 }) };
+    },
+  };
+  vm.runInNewContext(`${saveStateSource}; this.saveState = saveState;`, context);
+  assert.equal(await context.saveState(operation), true);
+  assert.equal(requestBody.operation, operation);
+}
+
+Promise.all([remoteSaveCheck("inbound"), remoteSaveCheck("outbound")])
+  .then(() => console.log("Remote transaction save checks passed."))
+  .catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
 
 async function login(baseUrl, username, password) {
   const response = await fetch(`${baseUrl}/api/login`, {
