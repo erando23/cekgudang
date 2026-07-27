@@ -1654,9 +1654,9 @@ function renderPurchaseRecordCard(record) {
       </div>
       ${record.note ? `<div class="muted">${record.note}</div>` : ""}
       <div class="transaction-card-items">
-        ${rows.slice(0, 3).join("")}
+        ${rows.slice(0, 5).join("")}
       </div>
-      ${rows.length > 3 ? `<div class="purchase-card-footer"><details class="transaction-card-detail purchase-card-more"><summary>Lihat selengkapnya (${rows.length - 3} item lain)</summary><div class="transaction-card-extra">${rows.slice(3).join("")}</div></details></div>` : ""}
+      ${rows.length > 5 ? `<div class="purchase-card-footer"><details class="transaction-card-detail purchase-card-more"><summary>Lihat selengkapnya (${rows.length - 5} item lain)</summary><div class="transaction-card-extra">${rows.slice(5).join("")}</div></details></div>` : ""}
     </article>
   `;
 }

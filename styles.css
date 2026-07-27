@@ -242,7 +242,7 @@ tbody tr:hover { background: var(--primary-soft); }
 .transaction-card-meta span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .transaction-card-items { display: grid; gap: 5px; min-width: 0; padding-top: 8px; border-top: 1px solid var(--border); }
 .transaction-location-items { display: grid; gap: 5px; }
-.transaction-location-items > div, .transaction-card-extra > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 24px; font-size: 13px; }
+.transaction-card-items > div, .transaction-location-items > div, .transaction-card-extra > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 24px; font-size: 13px; }
 .transaction-card-items span, .transaction-card-extra span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .transaction-card-items strong, .transaction-card-extra strong { flex: 0 0 auto; font-size: 12px; }
 .transaction-card-detail { min-width: 0; width: 100%; }

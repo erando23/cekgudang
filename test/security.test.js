@@ -83,6 +83,10 @@ Promise.all([remoteSaveCheck("inbound"), remoteSaveCheck("outbound")])
   assert.match(appSource, /paginateRows\(rows, historyPage, 9\)/);
   assert.match(appSource, /data-history-page=/);
   assert.match(appSource, /renderGroups\(hiddenGroups, groups\.length > 1\)/);
+  assert.match(appSource, /rows\.slice\(0, 5\)/);
+  assert.match(appSource, /rows\.slice\(5\)/);
+  const stylesSource = fs.readFileSync(require.resolve("../styles.css"), "utf8");
+  assert.match(stylesSource, /transaction-card-items > div/);
 
   assert.equal(typeof server.validateStateOperation, "function");
   const current = {
