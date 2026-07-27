@@ -207,6 +207,11 @@ function normalizeState(rawState) {
     return { productId: product.id, locationId: product.locationId, quantity };
   });
 
+  state.transactionItems = state.transactionItems.map((item) => ({
+    ...item,
+    locationId: Number(item.locationId || state.products.find((product) => product.id === Number(item.productId))?.locationId || 0),
+  }));
+
   state.purchaseItems = state.purchaseItems.map((item) => {
     const quantity = Number(item.quantity || 0);
     const unitPrice = Number(item.unitPrice || 0);
@@ -276,9 +281,11 @@ async function initDb() {
       id INTEGER PRIMARY KEY,
       transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
       product_id INTEGER NOT NULL REFERENCES products(id),
+      location_id INTEGER REFERENCES locations(id),
       quantity INTEGER NOT NULL
     )
   `);
+  await migrateTransactionItemLocations();
   await db.execute(`
     CREATE TABLE IF NOT EXISTS purchase_records (
       id TEXT PRIMARY KEY,
@@ -374,6 +381,18 @@ async function migrateUserRoleConstraint() {
   }
 }
 
+async function migrateTransactionItemLocations() {
+  const columns = await db.execute("PRAGMA table_info(transaction_items)");
+  if (!columns.rows.some((column) => column.name === "location_id")) {
+    await db.execute("ALTER TABLE transaction_items ADD COLUMN location_id INTEGER REFERENCES locations(id)");
+  }
+  await db.execute(`
+    UPDATE transaction_items
+    SET location_id = (SELECT location_id FROM products WHERE products.id = transaction_items.product_id)
+    WHERE location_id IS NULL
+  `);
+}
+
 async function readState(executor = db) {
   const statements = [
     "SELECT value FROM app_meta WHERE key = 'state_revision'",
@@ -382,7 +401,7 @@ async function readState(executor = db) {
     "SELECT id, name, unit, min_stock, location_id, active FROM products ORDER BY id",
     "SELECT product_id, location_id, quantity FROM product_stocks ORDER BY product_id, location_id",
     "SELECT id, type, user_id, source_location_id, dest_location_id, created_at FROM transactions ORDER BY created_at, id",
-    "SELECT id, transaction_id, product_id, quantity FROM transaction_items ORDER BY id",
+    "SELECT id, transaction_id, product_id, location_id, quantity FROM transaction_items ORDER BY id",
     "SELECT id, outlet_location_id, user_id, date, note, type, created_at FROM purchase_records ORDER BY date, created_at, id",
     "SELECT id, purchase_id, product_id, free_name, quantity, unit, unit_price, subtotal FROM purchase_items ORDER BY id",
   ];
@@ -423,6 +442,7 @@ async function readState(executor = db) {
       id: Number(row.id),
       transactionId: row.transaction_id,
       productId: Number(row.product_id),
+      locationId: Number(row.location_id),
       quantity: Number(row.quantity),
     })),
     purchaseRecords: purchaseRecords.rows.map((row) => ({
@@ -501,13 +521,19 @@ function assertStockChanges(currentState, nextState, operation, items) {
   for (const item of items) {
     const product = currentState.products.find((row) => row.id === Number(item.productId));
     if (!product) throw stateError("Produk transaksi tidak ditemukan.");
-    const key = `${product.id}:${product.locationId}`;
+    const locationId = Number(item.locationId);
+    const location = currentState.locations.find((row) => row.id === locationId);
+    if (location?.type !== "STORAGE" || Number(product.locationId) !== locationId) {
+      throw stateError("Lokasi item transaksi tidak valid.");
+    }
+    const key = `${product.id}:${locationId}`;
     const delta = operation === "inbound" ? Number(item.quantity) : -Number(item.quantity);
     expectedDelta.set(key, (expectedDelta.get(key) || 0) + delta);
   }
   const nextByKey = new Map(nextState.productStocks.map((row) => [`${row.productId}:${row.locationId}`, Number(row.quantity)]));
   for (const [key, currentQuantity] of currentByKey) {
     const expected = currentQuantity + (expectedDelta.get(key) || 0);
+    if (operation === "outbound" && expected < 0) throw stateError("Stok lokasi tidak cukup.");
     if (nextByKey.get(key) !== expected) throw stateError("Perubahan stok tidak sesuai dengan item transaksi.");
   }
   if (nextByKey.size !== currentByKey.size) throw stateError("Jumlah baris stok tidak valid.");
@@ -603,6 +629,15 @@ function validateStateOperation(currentState, nextState, operation, user) {
     if (addedItems.some((row) => row.transactionId !== transaction.id)) throw stateError("Item transaksi tambahan tidak valid.");
     const items = addedItems;
     if (!items.length || items.some((item) => Number(item.quantity) <= 0)) throw stateError("Item transaksi tidak valid.");
+    const itemLocationIds = new Set(items.map((item) => Number(item.locationId)));
+    const sourceLocationId = transaction.sourceLocationId == null ? null : Number(transaction.sourceLocationId);
+    const destination = currentState.locations.find((row) => row.id === Number(transaction.destLocationId));
+    if (sourceLocationId !== (itemLocationIds.size === 1 ? [...itemLocationIds][0] : null)) {
+      throw stateError("Ringkasan lokasi asal transaksi tidak valid.");
+    }
+    if (operation === "outbound" ? destination?.type !== "DESTINATION" : transaction.destLocationId != null) {
+      throw stateError("Tujuan transaksi tidak valid.");
+    }
     assertStockChanges(currentState, nextState, operation, items);
     return;
   }
@@ -673,8 +708,8 @@ async function writeState(inputState, expectedRevision, operation, user) {
     }
     for (const item of state.transactionItems) {
       statements.push({
-        sql: "INSERT INTO transaction_items (id, transaction_id, product_id, quantity) VALUES (?, ?, ?, ?)",
-        args: [item.id, item.transactionId, item.productId, item.quantity],
+        sql: "INSERT INTO transaction_items (id, transaction_id, product_id, location_id, quantity) VALUES (?, ?, ?, ?, ?)",
+        args: [item.id, item.transactionId, item.productId, item.locationId, item.quantity],
       });
     }
     for (const record of state.purchaseRecords) {
@@ -1052,5 +1087,5 @@ if (require.main === module) {
   });
 }
 
-Object.assign(server, { assertStateRevision, createSessionToken, hashPassword, readSessionToken, verifyPassword });
+Object.assign(server, { assertStateRevision, createSessionToken, hashPassword, readSessionToken, validateStateOperation, verifyPassword });
 module.exports = server;

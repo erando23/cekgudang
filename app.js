@@ -55,7 +55,7 @@ const seedState = {
   users: [
     {
       id: 1,
-      name: "Erando",
+      name: "Erando23",
       username: "erando23",
       role: "ADMIN",
     },
@@ -156,6 +156,7 @@ let purchaseRecordPeriod = "day";
 let purchaseRecordSearch = "";
 let purchaseSearchDebounce = null;
 let historyTab = "transaction";
+let historyPage = 1;
 let masterLowOnly = false;
 let masterSearchQuery = "";
 let masterModalOpen = false;
@@ -211,6 +212,10 @@ function migrateState(savedState) {
       { productId: product.id, locationId: product.locationId, quantity },
     ];
   });
+  savedState.transactionItems = savedState.transactionItems.map((item) => ({
+    ...item,
+    locationId: Number(item.locationId || savedState.products.find((product) => product.id === Number(item.productId))?.locationId || 0),
+  }));
   savedState.purchaseItems = savedState.purchaseItems.map((item) => {
     const quantity = Number(item.quantity || 0);
     const unitPrice = Number(item.unitPrice || 0);
@@ -387,6 +392,22 @@ function destinationLocations() {
 
 function productById(id) {
   return state.products.find((product) => product.id === Number(id));
+}
+
+function groupTransactionItemsByLocation(items) {
+  return items.reduce((groups, item) => {
+    const locationId = Number(item.locationId || item.sourceId || productById(item.productId)?.locationId || 0);
+    if (!groups.has(locationId)) groups.set(locationId, []);
+    groups.get(locationId).push(item);
+    return groups;
+  }, new Map());
+}
+
+function paginateRows(rows, page, pageSize) {
+  const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
+  const currentPage = Math.min(Math.max(1, Number(page) || 1), pageCount);
+  const start = (currentPage - 1) * pageSize;
+  return { page: currentPage, pageCount, rows: rows.slice(start, start + pageSize) };
 }
 
 function locationById(id) {
@@ -1144,7 +1165,6 @@ function renderLowStockRow(product) {
 }
 
 function renderInbound() {
-  const defaultLocationId = storageLocations()[0]?.id || "";
   return `
     <div class="page-head motion-fade">
       <div>
@@ -1156,20 +1176,17 @@ function renderInbound() {
       <div class="panel">
         <h2 class="section-title">Tambah ke Daftar</h2>
         <form id="inbound-add" class="grid">
-          <div class="field">
-            <label>Lokasi penyimpanan</label>
-            <select name="locationId">${optionHtml(storageLocations())}</select>
-          </div>
           <div class="form-grid">
             <div class="field">
               <label>Barang</label>
-              ${productPickerHtml({ id: "inbound-product-options", locationId: defaultLocationId })}
+              ${productPickerHtml({ id: "inbound-product-options" })}
             </div>
             <div class="field">
               <label>Jumlah</label>
               <input name="quantity" type="number" min="1" value="1" required />
             </div>
           </div>
+          <small class="muted">Lokasi penyimpanan otomatis mengikuti master barang.</small>
           <button class="btn" type="submit">Tambah ke Daftar</button>
         </form>
       </div>
@@ -1187,6 +1204,7 @@ function renderInbound() {
 
 function renderOutbound() {
   const defaultSourceId = storageLocations()[0]?.id || "";
+  const destinationId = outboundCart[0]?.destId || destinationLocations()[0]?.id || "";
   return `
     <div class="page-head motion-fade">
       <div>
@@ -1205,7 +1223,8 @@ function renderOutbound() {
             </div>
             <div class="field">
               <label>Tujuan</label>
-              <select name="destId">${optionHtml(destinationLocations())}</select>
+              <select name="destId" ${outboundCart.length ? "disabled" : ""}>${optionHtml(destinationLocations(), destinationId)}</select>
+              ${outboundCart.length ? `<input name="destId" type="hidden" value="${destinationId}" /><small class="muted">      Tujuan dikunci sampai daftar dikosongkan.</small>` : ""}
             </div>
           </div>
           <div class="form-grid">
@@ -1237,21 +1256,24 @@ function renderCart(cart, type) {
   if (!cart.length) return `<div class="muted">Daftar masih kosong.</div>`;
   return `
     <div class="cart-list">
-      ${cart
-        .map((item, index) => {
-          const product = productById(item.productId);
-          const source = locationById(item.locationId || item.sourceId);
-          const dest = locationById(item.destId);
-          return `
-            <div class="cart-row">
-              <div>
-                <strong>${product.name}</strong>
-                <div class="muted">${item.quantity} ${product.unit} - ${source.name}${dest ? ` ke ${dest.name}` : ""}</div>
-              </div>
-              <button class="btn small danger" data-remove-cart="${type}" data-index="${index}">Hapus</button>
-            </div>
-          `;
-        })
+      ${[...groupTransactionItemsByLocation(cart)]
+        .map(([locationId, items]) => `
+          <section class="cart-group">
+            <div class="cart-group-title">${type === "inbound" ? "Penyimpanan" : "Asal"}: ${locationById(locationId)?.name || "-"}</div>
+            ${items.map((item) => {
+              const product = productById(item.productId);
+              return `
+                <div class="cart-row">
+                  <div>
+                    <strong>${product.name}</strong>
+                    <div class="muted">${item.quantity} ${product.unit}${item.destId ? ` ke ${locationById(item.destId)?.name || "-"}` : ""}</div>
+                  </div>
+                  <button class="btn small danger" data-remove-cart="${type}" data-index="${cart.indexOf(item)}">Hapus</button>
+                </div>
+              `;
+            }).join("")}
+          </section>
+        `)
         .join("")}
     </div>
   `;
@@ -1657,10 +1679,19 @@ function renderHistory() {
 
 function renderTransactionHistory() {
   const rows = [...state.transactions].reverse();
+  const page = paginateRows(rows, historyPage, 9);
+  historyPage = page.page;
   return `
     <section class="transaction-history-list">
-      ${rows.length ? rows.map(renderTransactionCard).join("") : `<div class="panel muted">Belum ada transaksi.</div>`}
+      ${rows.length ? page.rows.map(renderTransactionCard).join("") : `<div class="panel muted">Belum ada transaksi.</div>`}
     </section>
+    ${page.pageCount > 1 ? `
+      <nav class="history-pagination" aria-label="Pagination riwayat transaksi">
+        <button class="btn secondary small" data-history-page="${page.page - 1}" ${page.page === 1 ? "disabled" : ""}>← Sebelumnya</button>
+        <span>Halaman ${page.page} dari ${page.pageCount}</span>
+        <button class="btn secondary small" data-history-page="${page.page + 1}" ${page.page === page.pageCount ? "disabled" : ""}>Berikutnya →</button>
+      </nav>
+    ` : ""}
   `;
 }
 
@@ -1669,15 +1700,31 @@ function renderTransactionCard(trx) {
   const items = state.transactionItems.filter(
     (item) => item.transactionId === trx.id,
   );
-  const itemRows = items.map((item) => {
-    const product = productById(item.productId);
-    return `<div><span>${product ? product.name : "Barang tidak ditemukan"}</span><strong>${item.quantity} ${product ? product.unit : ""}</strong></div>`;
+  const groups = [...groupTransactionItemsByLocation(items)];
+  let visibleRemaining = 5;
+  const visibleGroups = [];
+  const hiddenGroups = [];
+  groups.forEach(([locationId, groupItems]) => {
+    const visibleItems = groupItems.slice(0, visibleRemaining);
+    visibleRemaining -= visibleItems.length;
+    if (visibleItems.length) visibleGroups.push([locationId, visibleItems]);
+    if (visibleItems.length < groupItems.length) hiddenGroups.push([locationId, groupItems.slice(visibleItems.length)]);
   });
-  const visibleItemRows = itemRows.slice(0, 3).join("");
-  const hiddenItemRows = itemRows.slice(3).join("");
-  const source = locationById(trx.sourceLocationId);
+  const renderGroups = (groupList, showLocation = true) => groupList.map(([locationId, groupItems]) => `
+    <section class="transaction-location-group">
+      ${showLocation ? `<div class="transaction-location-title">${trx.type === "INBOUND" ? "Penyimpanan" : "Asal"}: ${locationById(locationId)?.name || "-"}</div>` : ""}
+      <div class="transaction-location-items">
+        ${groupItems.map((item) => {
+          const product = productById(item.productId);
+          return `<div><span>${product ? product.name : "Barang tidak ditemukan"}</span><strong>${item.quantity} ${product ? product.unit : ""}</strong></div>`;
+        }).join("")}
+      </div>
+    </section>
+  `).join("");
   const dest = locationById(trx.destLocationId);
-  const locationText = `${source ? source.name : "-"}${dest ? ` -> ${dest.name}` : ""}`;
+  const locationText = trx.type === "INBOUND"
+    ? groups.length === 1 ? locationById(groups[0][0])?.name || "-" : `${groups.length} lokasi penyimpanan`
+    : `${groups.length === 1 ? locationById(groups[0][0])?.name || "-" : `${groups.length} lokasi asal`} -> ${dest?.name || "-"}`;
   return `
     <article class="card transaction-card">
       <div class="transaction-card-head">
@@ -1693,13 +1740,11 @@ function renderTransactionCard(trx) {
         <span>${locationText}</span>
       </div>
       <div class="transaction-card-items">
-        ${visibleItemRows}
-        ${hiddenItemRows ? `
+        ${renderGroups(visibleGroups)}
+        ${hiddenGroups.length ? `
           <details class="transaction-card-detail">
-            <summary>Lihat detail ${itemRows.length} barang</summary>
-            <div class="transaction-card-extra">
-              ${hiddenItemRows}
-            </div>
+            <summary>Lihat selengkapnya (${items.length - 5} item lain)</summary>
+            <div class="transaction-card-extra">${renderGroups(hiddenGroups, groups.length > 1)}</div>
           </details>
         ` : ""}
       </div>
@@ -1790,7 +1835,7 @@ function renderItemHistory() {
 
 function renderItemHistoryRow(row) {
   const product = productById(row.item.productId);
-  const source = locationById(row.trx.sourceLocationId);
+  const source = locationById(row.item.locationId || product?.locationId);
   const dest = locationById(row.trx.destLocationId);
   const user = state.users.find((item) => item.id === row.trx.userId);
   return `
@@ -1799,7 +1844,7 @@ function renderItemHistoryRow(row) {
       <td>${product.name}</td>
       <td><span class="badge ${row.trx.type === "OUTBOUND" ? "warn" : ""}">${row.trx.type === "INBOUND" ? "Masuk" : "Keluar"}</span></td>
       <td>${row.item.quantity} ${product.unit}</td>
-      <td>${source ? source.name : "-"}${dest ? ` -> ${dest.name}` : ""}</td>
+      <td>${source ? source.name : "-"}${row.trx.type === "OUTBOUND" ? ` -> ${dest?.name || "-"}` : ""}</td>
       <td>${user ? user.name : "-"}</td>
     </tr>
   `;
@@ -2140,33 +2185,19 @@ function bindPageEvents() {
 
 function bindInbound() {
   const formElement = document.getElementById("inbound-add");
-  bindProductSearch(formElement, "locationId");
-  formElement.locationId.addEventListener("change", () =>
-    updateProductSelectForLocation(formElement, "locationId"),
-  );
+  bindProductSearch(formElement);
   formElement.addEventListener("submit", (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const quantity = Number(form.get("quantity"));
-    const locationId = Number(form.get("locationId"));
     const productId = Number(form.get("productId"));
     const product = productById(productId);
     if (quantity <= 0) return toast("Jumlah harus lebih dari 0.");
     if (!product)
-      return toast("Tidak ada barang yang bisa dipilih di lokasi ini.");
-    if (product.locationId !== locationId) {
-      return toast(
-        `Barang ${product.name} hanya boleh disimpan di ${productLocation(product.id).name}.`,
-      );
-    }
-    if (inboundCart.length && inboundCart[0].locationId !== locationId) {
-      return toast(
-        "Satu transaksi barang masuk hanya boleh memakai satu lokasi.",
-      );
-    }
+      return toast("Pilih barang dari daftar yang tersedia.");
     inboundCart.push({
       productId,
-      locationId,
+      locationId: product.locationId,
       quantity,
     });
     render();
@@ -2209,14 +2240,8 @@ function bindOutbound() {
         `Barang ${product.name} hanya tersedia dari ${productLocation(product.id).name}.`,
       );
     }
-    if (
-      outboundCart.length &&
-      (outboundCart[0].sourceId !== sourceId ||
-        outboundCart[0].destId !== destId)
-    ) {
-      return toast(
-        "Satu transaksi barang keluar hanya boleh memakai satu lokasi asal dan tujuan.",
-      );
+    if (outboundCart.length && outboundCart[0].destId !== destId) {
+      return toast("Satu transaksi barang keluar hanya boleh memakai satu tujuan.");
     }
     if (stockFor(productId, sourceId) < quantity + alreadyInCart) {
       return toast("Stok lokasi tidak cukup untuk barang tersebut.");
@@ -2383,7 +2408,7 @@ function bindProductSearch(formElement, locationFieldName) {
   formElement.productSearch.addEventListener("input", () => {
     const product = findProductFromSearch(
       formElement.productSearch.value,
-      formElement[locationFieldName].value,
+      locationFieldName ? formElement[locationFieldName].value : "",
     );
     formElement.productId.value = product ? product.id : "";
   });
@@ -2393,6 +2418,12 @@ function bindHistory() {
   document.querySelectorAll("[data-history-tab]").forEach((button) => {
     button.addEventListener("click", () => {
       historyTab = button.dataset.historyTab;
+      render();
+    });
+  });
+  document.querySelectorAll("[data-history-page]").forEach((button) => {
+    button.addEventListener("click", () => {
+      historyPage = Number(button.dataset.historyPage);
       render();
     });
   });
@@ -2577,12 +2608,12 @@ async function submitInbound() {
   )
     return;
   const id = trxId();
-  const first = inboundCart[0];
+  const locations = new Set(inboundCart.map((item) => item.locationId));
   state.transactions.push({
     id,
     type: "INBOUND",
     userId: currentUser().id,
-    sourceLocationId: first.locationId,
+    sourceLocationId: locations.size === 1 ? [...locations][0] : null,
     destLocationId: null,
     createdAt: new Date().toISOString(),
   });
@@ -2591,6 +2622,7 @@ async function submitInbound() {
       id: nextId(state.transactionItems),
       transactionId: id,
       productId: item.productId,
+      locationId: item.locationId,
       quantity: item.quantity,
     });
     setStock(
@@ -2604,6 +2636,7 @@ async function submitInbound() {
   toast(`Transaksi ${id} tersimpan.`);
   route = "history";
   historyTab = "transaction";
+  historyPage = 1;
   render();
 }
 
@@ -2622,11 +2655,12 @@ async function submitOutbound() {
     return;
   const id = trxId();
   const first = outboundCart[0];
+  const locations = new Set(outboundCart.map((item) => item.sourceId));
   state.transactions.push({
     id,
     type: "OUTBOUND",
     userId: currentUser().id,
-    sourceLocationId: first.sourceId,
+    sourceLocationId: locations.size === 1 ? first.sourceId : null,
     destLocationId: first.destId,
     createdAt: new Date().toISOString(),
   });
@@ -2635,6 +2669,7 @@ async function submitOutbound() {
       id: nextId(state.transactionItems),
       transactionId: id,
       productId: item.productId,
+      locationId: item.sourceId,
       quantity: item.quantity,
     });
     setStock(
@@ -2648,6 +2683,7 @@ async function submitOutbound() {
   toast(`Transaksi ${id} tersimpan.`);
   route = "history";
   historyTab = "transaction";
+  historyPage = 1;
   render();
 }
 
@@ -2697,24 +2733,24 @@ function transactionText(trxIdValue) {
   const trx = state.transactions.find((item) => item.id === trxIdValue);
   if (!trx) return "";
   const user = state.users.find((item) => item.id === trx.userId);
-  const source = locationById(trx.sourceLocationId);
   const dest = locationById(trx.destLocationId);
+  const groups = [...groupTransactionItemsByLocation(state.transactionItems.filter((item) => item.transactionId === trx.id))];
   const lines = [
     `*${trx.type === "INBOUND" ? "BARANG MASUK" : "BARANG KELUAR"}*`,
     `ID: ${trx.id}`,
     `Tanggal: ${formatDate(trx.createdAt)}`,
-    `${trx.type === "INBOUND" ? "Lokasi" : "Dari"}: ${source ? source.name : "-"}`,
   ];
   if (dest) lines.push(`Tujuan: ${dest.name}`);
   lines.push(`Dicatat oleh: ${user ? user.name : "-"}`, "", "Daftar Barang:");
-  state.transactionItems
-    .filter((item) => item.transactionId === trx.id)
-    .forEach((item, index) => {
+  groups.forEach(([locationId, items]) => {
+    lines.push("", `${trx.type === "INBOUND" ? "Penyimpanan" : "Asal"}: ${locationById(locationId)?.name || "-"}`);
+    items.forEach((item, index) => {
       const product = productById(item.productId);
       lines.push(
         `${index + 1}. ${product.name} - ${item.quantity} ${product.unit}`,
       );
     });
+  });
   return lines.join("\n");
 }
 

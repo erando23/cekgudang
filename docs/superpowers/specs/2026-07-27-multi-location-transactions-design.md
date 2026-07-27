@@ -25,6 +25,8 @@ The server verifies that every item location is a valid storage location, matche
 
 Inbound removes the editable location selector and derives location from the chosen product. Outbound keeps source selection for finding products and locks the destination after the first cart item until the cart is emptied. Shared grouping markup renders cart items, history cards, item history labels, and WhatsApp transaction text by item location.
 
+Transaction history shows at most 9 transactions per page with previous/next controls and a page indicator. Each card shows five item rows before `Lihat selengkapnya`. When a transaction uses only one storage location, the expanded section continues the item list without repeating the location heading.
+
 ## Verification
 
 Add one runnable Node test covering multi-location grouping and server-side transaction validation, run `npm test`, then start `npm start` and run the HTTP integration test against localhost.

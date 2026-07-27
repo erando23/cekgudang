@@ -224,9 +224,14 @@ tbody tr:hover { background: var(--primary-soft); }
 .badge.danger { color: var(--danger); background: rgba(233, 109, 109, 0.12); }
 
 .cart-list, .transaction-list, .low-list, .detail-activity { display: grid; gap: 12px; }
+.cart-group, .transaction-location-group { display: grid; gap: 8px; }
+.cart-group-title, .transaction-location-title { color: var(--muted); font-size: 12px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
 .cart-row, .low-row, .history-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 18px; background: var(--card-soft); }
 
 .transaction-history-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 10px; min-width: 0; }
+.history-pagination { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 16px; }
+.history-pagination span { color: var(--muted); font-size: 13px; font-weight: 800; }
+.history-pagination .btn:disabled { opacity: .45; cursor: not-allowed; }
 .transaction-card { display: grid; gap: 9px; min-width: 0; padding: 12px; border-radius: 18px; }
 .transaction-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .transaction-card-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -236,7 +241,8 @@ tbody tr:hover { background: var(--primary-soft); }
 .transaction-card-meta { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 6px 10px; color: var(--muted); font-size: 12px; }
 .transaction-card-meta span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .transaction-card-items { display: grid; gap: 5px; min-width: 0; padding-top: 8px; border-top: 1px solid var(--border); }
-.transaction-card-items > div, .transaction-card-extra > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 24px; font-size: 13px; }
+.transaction-location-items { display: grid; gap: 5px; }
+.transaction-location-items > div, .transaction-card-extra > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 24px; font-size: 13px; }
 .transaction-card-items span, .transaction-card-extra span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .transaction-card-items strong, .transaction-card-extra strong { flex: 0 0 auto; font-size: 12px; }
 .transaction-card-detail { min-width: 0; width: 100%; }

@@ -48,6 +48,7 @@ const transactionItems = sqliteTable("transaction_items", {
   id: integer("id").primaryKey(),
   transactionId: text("transaction_id").notNull().references(() => transactions.id),
   productId: integer("product_id").notNull().references(() => products.id),
+  locationId: integer("location_id").references(() => locations.id),
   quantity: integer("quantity").notNull(),
 });
 

@@ -1,7 +1,8 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
-const { assertStateRevision, createSessionToken, hashPassword, readSessionToken, verifyPassword } = require("../server");
+const server = require("../server");
+const { assertStateRevision, createSessionToken, hashPassword, readSessionToken, verifyPassword } = server;
 
 (() => {
   const passwordHash = hashPassword("secret-password");
@@ -49,6 +50,79 @@ Promise.all([remoteSaveCheck("inbound"), remoteSaveCheck("outbound")])
     console.error(error);
     process.exitCode = 1;
   });
+
+(() => {
+  const appSource = fs.readFileSync(require.resolve("../app.js"), "utf8");
+  const start = appSource.indexOf("function groupTransactionItemsByLocation");
+  assert.notEqual(start, -1, "groupTransactionItemsByLocation must exist");
+  const end = appSource.indexOf("\nfunction ", start + 1);
+  const context = {
+    productById: (id) => ({ id, locationId: id }),
+  };
+  vm.runInNewContext(`${appSource.slice(start, end)}; this.group = groupTransactionItemsByLocation;`, context);
+  assert.deepEqual(
+    Array.from(context.group([
+      { productId: 1, locationId: 1, quantity: 2 },
+      { productId: 2, locationId: 2, quantity: 3 },
+      { productId: 3, locationId: 1, quantity: 4 },
+    ]), ([locationId, items]) => [locationId, items.length]),
+    [[1, 2], [2, 1]],
+  );
+
+  const paginateStart = appSource.indexOf("function paginateRows");
+  assert.notEqual(paginateStart, -1, "paginateRows must exist");
+  const paginateEnd = appSource.indexOf("\nfunction ", paginateStart + 1);
+  vm.runInNewContext(`${appSource.slice(paginateStart, paginateEnd)}; this.paginate = paginateRows;`, context);
+  const page = context.paginate(Array.from({ length: 25 }, (_, index) => index + 1), 2, 9);
+  assert.deepEqual({ page: page.page, pageCount: page.pageCount, rows: Array.from(page.rows) }, {
+    page: 2,
+    pageCount: 3,
+    rows: Array.from({ length: 9 }, (_, index) => index + 10),
+  });
+  assert.equal(context.paginate([1, 2, 3], 99, 9).page, 1);
+  assert.match(appSource, /paginateRows\(rows, historyPage, 9\)/);
+  assert.match(appSource, /data-history-page=/);
+  assert.match(appSource, /renderGroups\(hiddenGroups, groups\.length > 1\)/);
+
+  assert.equal(typeof server.validateStateOperation, "function");
+  const current = {
+    locations: [
+      { id: 1, type: "STORAGE" },
+      { id: 2, type: "STORAGE" },
+      { id: 3, type: "DESTINATION" },
+    ],
+    products: [
+      { id: 1, locationId: 1 },
+      { id: 2, locationId: 2 },
+    ],
+    productStocks: [
+      { productId: 1, locationId: 1, quantity: 10 },
+      { productId: 2, locationId: 2, quantity: 10 },
+    ],
+    transactions: [],
+    transactionItems: [],
+    purchaseRecords: [],
+    purchaseItems: [],
+  };
+  const next = structuredClone(current);
+  next.transactions.push({ id: "TRX-1", type: "OUTBOUND", userId: 7, sourceLocationId: null, destLocationId: 3 });
+  next.transactionItems.push(
+    { id: 1, transactionId: "TRX-1", productId: 1, locationId: 1, quantity: 2 },
+    { id: 2, transactionId: "TRX-1", productId: 2, locationId: 2, quantity: 3 },
+  );
+  next.productStocks[0].quantity = 8;
+  next.productStocks[1].quantity = 7;
+  assert.doesNotThrow(() => server.validateStateOperation(current, next, "outbound", { id: 7, role: "STAFF" }));
+
+  const negativeStock = structuredClone(next);
+  negativeStock.transactionItems[0].quantity = 11;
+  negativeStock.productStocks[0].quantity = -1;
+  assert.throws(
+    () => server.validateStateOperation(current, negativeStock, "outbound", { id: 7, role: "STAFF" }),
+    /Stok lokasi tidak cukup/,
+  );
+  console.log("Multi-location transaction checks passed.");
+})();
 
 async function login(baseUrl, username, password) {
   const response = await fetch(`${baseUrl}/api/login`, {
