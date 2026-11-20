@@ -766,14 +766,18 @@ function sendJson(response, statusCode, payload) {
 function readRequestBody(request) {
   return new Promise((resolve, reject) => {
     let body = "";
+    let rejected = false;
     request.on("data", (chunk) => {
+      if (rejected) return;
       body += chunk;
-      if (body.length > 2_000_000) {
-        request.destroy();
+      if (body.length > 4_000_000) {
+        rejected = true;
         reject(new Error("Request body too large"));
       }
     });
-    request.on("end", () => resolve(body));
+    request.on("end", () => {
+      if (!rejected) resolve(body);
+    });
     request.on("error", reject);
   });
 }
