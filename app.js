@@ -2608,7 +2608,7 @@ async function submitInbound() {
   )
     return;
   const id = trxId();
-  const locations = new Set(inboundCart.map((item) => item.locationId));
+  const locations = new Set(inboundCart.map((item) => productById(item.productId)?.locationId));
   state.transactions.push({
     id,
     type: "INBOUND",

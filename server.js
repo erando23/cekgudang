@@ -629,7 +629,12 @@ function validateStateOperation(currentState, nextState, operation, user) {
     if (addedItems.some((row) => row.transactionId !== transaction.id)) throw stateError("Item transaksi tambahan tidak valid.");
     const items = addedItems;
     if (!items.length || items.some((item) => Number(item.quantity) <= 0)) throw stateError("Item transaksi tidak valid.");
-    const itemLocationIds = new Set(items.map((item) => Number(item.locationId)));
+    // Inbound stock always goes to each product's configured storage location.
+    // The user does not choose a source location during inbound entry.
+    const itemLocationIds = new Set(items.map((item) => {
+      const product = currentState.products.find((row) => row.id === Number(item.productId));
+      return Number(product?.locationId);
+    }));
     const sourceLocationId = transaction.sourceLocationId == null ? null : Number(transaction.sourceLocationId);
     const destination = currentState.locations.find((row) => row.id === Number(transaction.destLocationId));
     if (sourceLocationId !== (itemLocationIds.size === 1 ? [...itemLocationIds][0] : null)) {
@@ -730,7 +735,12 @@ async function writeState(inputState, expectedRevision, operation, user) {
       sql: "UPDATE app_meta SET value = ? WHERE key = 'state_revision'",
       args: [nextRevision],
     });
-    await transaction.batch(statements);
+    // Turso/libSQL can reject very large batches. Keep one transaction, but
+    // send statements in bounded chunks so the write remains atomic.
+    const batchSize = 100;
+    for (let index = 0; index < statements.length; index += batchSize) {
+      await transaction.batch(statements.slice(index, index + batchSize));
+    }
     await transaction.commit();
     return nextRevision;
   } catch (error) {
@@ -966,6 +976,7 @@ async function handleApi(request, response, pathname) {
       const revision = await writeState(inputState, inputState.revision, inputState.operation, authentication.user);
       sendJson(response, 200, { ok: true, revision });
     } catch (error) {
+      console.error("PUT /api/state failed:", error);
       if (!["STATE_CONFLICT", "STATE_FORBIDDEN", "STATE_OPERATION_REQUIRED"].includes(error.code)) throw error;
       if (error.code !== "STATE_CONFLICT") {
         sendJson(response, 403, { error: error.message });
