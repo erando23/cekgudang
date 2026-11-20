@@ -751,6 +751,48 @@ async function writeState(inputState, expectedRevision, operation, user) {
   }
 }
 
+async function writeTransaction(input, expectedRevision, user) {
+  const transaction = await db.transaction("write");
+  try {
+    const current = await readState(transaction);
+    assertStateRevision(expectedRevision, current.revision);
+    const type = String(input?.transaction?.type || "");
+    const operation = type.toLowerCase();
+    if (!["inbound", "outbound"].includes(operation)) throw stateError("Jenis transaksi tidak valid.");
+    const record = input.transaction;
+    const items = Array.isArray(input.items) ? input.items : [];
+    if (!record.id || Number(record.userId) !== Number(user.id) || record.type !== type || !items.length) throw stateError("Transaksi tidak valid.");
+    const locations = new Set();
+    const stockChanges = new Map();
+    for (const item of items) {
+      const product = current.products.find((row) => row.id === Number(item.productId));
+      const locationId = operation === "inbound" ? Number(product?.locationId) : Number(item.locationId);
+      const location = current.locations.find((row) => row.id === locationId);
+      const quantity = Number(item.quantity);
+      if (!product || location?.type !== "STORAGE" || quantity <= 0 || (operation === "outbound" && Number(product.locationId) !== locationId)) throw stateError("Item transaksi tidak valid.");
+      locations.add(locationId);
+      const key = `${product.id}:${locationId}`;
+      const currentStock = current.productStocks.find((row) => row.productId === product.id && row.locationId === locationId);
+      const nextQuantity = Number(currentStock?.quantity || 0) + (operation === "inbound" ? quantity : -quantity);
+      if (nextQuantity < 0) throw stateError("Stok lokasi tidak cukup.");
+      stockChanges.set(key, { productId: product.id, locationId, quantity: nextQuantity });
+    }
+    if (operation === "inbound" && record.destLocationId != null) throw stateError("Tujuan inbound harus kosong.");
+    if (operation === "outbound" && current.locations.find((row) => row.id === Number(record.destLocationId))?.type !== "DESTINATION") throw stateError("Tujuan transaksi tidak valid.");
+    const source = record.sourceLocationId == null ? null : Number(record.sourceLocationId);
+    if (source !== (locations.size === 1 ? [...locations][0] : null)) throw stateError("Lokasi asal transaksi tidak valid.");
+    const statements = [
+      { sql: "INSERT INTO transactions (id, type, user_id, source_location_id, dest_location_id, created_at) VALUES (?, ?, ?, ?, ?, ?)", args: [record.id, type, user.id, source, record.destLocationId ?? null, record.createdAt] },
+      ...items.map((item, index) => ({ sql: "INSERT INTO transaction_items (id, transaction_id, product_id, location_id, quantity) VALUES (?, ?, ?, ?, ?)", args: [item.id || Date.now() + index, record.id, item.productId, operation === "inbound" ? current.products.find((row) => row.id === Number(item.productId)).locationId : item.locationId, item.quantity] })),
+      ...[...stockChanges.values()].map((stock) => ({ sql: "UPDATE product_stocks SET quantity = ? WHERE product_id = ? AND location_id = ?", args: [stock.quantity, stock.productId, stock.locationId] })),
+      { sql: "UPDATE app_meta SET value = ? WHERE key = 'state_revision'", args: [current.revision + 1] },
+    ];
+    for (let index = 0; index < statements.length; index += 100) await transaction.batch(statements.slice(index, index + 100));
+    await transaction.commit();
+    return current.revision + 1;
+  } catch (error) { await transaction.rollback().catch(() => {}); throw error; } finally { transaction.close(); }
+}
+
 function setSecurityHeaders(response) {
   response.setHeader("X-Content-Type-Options", "nosniff");
   response.setHeader("X-Frame-Options", "DENY");
@@ -970,6 +1012,18 @@ async function handleApi(request, response, pathname) {
 
   if (pathname === "/api/state" && request.method === "GET") {
     sendJson(response, 200, await readState());
+    return;
+  }
+
+  if (pathname === "/api/transactions" && request.method === "POST") {
+    try {
+      const input = JSON.parse(await readRequestBody(request));
+      const revision = await writeTransaction(input, input.revision, authentication.user);
+      sendJson(response, 200, { ok: true, revision });
+    } catch (error) {
+      if (["STATE_CONFLICT", "STATE_FORBIDDEN", "STATE_OPERATION_REQUIRED"].includes(error.code)) sendJson(response, error.code === "STATE_CONFLICT" ? 409 : 403, { error: error.message });
+      else sendJson(response, 500, { error: "TRANSACTION_WRITE_FAILED", message: String(error?.message || error) });
+    }
     return;
   }
 

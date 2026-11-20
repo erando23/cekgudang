@@ -234,6 +234,26 @@ function migrateState(savedState) {
 
 async function saveState(operation) {
   if (API_BASE) {
+    const savingToast = typeof toast === "function" ? toast("Menyimpan transaksi…", 0) : { remove() {} };
+    if ((operation === "inbound" || operation === "outbound") && (state.transactions || []).length) {
+      const transactions = state.transactions || [];
+      const transactionItems = state.transactionItems || [];
+      const record = transactions[transactions.length - 1];
+      const items = transactionItems.filter((item) => item.transactionId === record?.id);
+      const response = await fetch(`${API_BASE}/transactions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revision: state.revision, transaction: record, items }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      savingToast.remove();
+      if (!response.ok) {
+        toast(`Gagal menyimpan: ${payload.message || payload.error || `HTTP ${response.status}`}`);
+        return false;
+      }
+      state.revision = Number(payload.revision);
+      return true;
+    }
     const snapshot = structuredClone(state);
     snapshot.operation = operation;
     const generation = stateGeneration;
@@ -276,6 +296,9 @@ async function saveState(operation) {
         console.error("Save state failed:", error);
         toast(`Gagal menyimpan: ${error.message}`);
         return false;
+      })
+      .finally(() => {
+        savingToast.remove();
       });
     saveQueue = pendingSave;
     return pendingSave;
@@ -841,14 +864,15 @@ async function importPurchaseCsv(event, formElement) {
   }
 }
 
-function toast(message) {
+function toast(message, duration = 2600) {
   const old = document.querySelector(".toast");
   if (old) old.remove();
   const node = document.createElement("div");
   node.className = "toast";
   node.textContent = message;
   document.body.appendChild(node);
-  setTimeout(() => node.remove(), 2600);
+  if (duration > 0) setTimeout(() => node.remove(), duration);
+  return node;
 }
 
 function escapeAttribute(value) {
