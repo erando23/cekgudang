@@ -266,12 +266,15 @@ async function saveState(operation) {
           toast(payload.error || "Operasi tidak diizinkan.");
           return false;
         }
-        if (!response.ok) throw new Error("Backend state update failed");
+        if (!response.ok) {
+          throw new Error(payload.message || payload.error || "Backend state update failed");
+        }
         state.revision = Number(payload.revision);
         return true;
       })
-      .catch(() => {
-        toast("Gagal menyimpan ke backend.");
+      .catch((error) => {
+        console.error("Save state failed:", error);
+        toast(`Gagal menyimpan: ${error.message}`);
         return false;
       });
     saveQueue = pendingSave;

@@ -977,14 +977,20 @@ async function handleApi(request, response, pathname) {
       sendJson(response, 200, { ok: true, revision });
     } catch (error) {
       console.error("PUT /api/state failed:", error);
-      if (!["STATE_CONFLICT", "STATE_FORBIDDEN", "STATE_OPERATION_REQUIRED"].includes(error.code)) throw error;
-      if (error.code !== "STATE_CONFLICT") {
+      if (error.code === "STATE_CONFLICT") {
+        sendJson(response, 409, {
+          error: error.message,
+          state: await readState(),
+        });
+        return;
+      }
+      if (["STATE_FORBIDDEN", "STATE_OPERATION_REQUIRED"].includes(error.code)) {
         sendJson(response, 403, { error: error.message });
         return;
       }
-      sendJson(response, 409, {
-        error: error.message,
-        state: await readState(),
+      sendJson(response, 500, {
+        error: "STATE_WRITE_FAILED",
+        message: String(error?.message || error),
       });
     }
     return;
