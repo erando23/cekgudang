@@ -678,6 +678,7 @@ async function writeState(inputState, expectedRevision, operation, user) {
     assertStateRevision(expectedRevision, currentRevision);
     if (expectedRevision !== null) validateStateOperation(currentState, state, operation, user);
     const nextRevision = currentRevision + 1;
+    const nextItemId = Math.max(0, ...current.transactionItems.map((item) => Number(item.id) || 0)) + 1;
     const statements = [
       { sql: "DELETE FROM transaction_items", args: [] },
       { sql: "DELETE FROM purchase_items", args: [] },
@@ -762,6 +763,7 @@ async function writeTransaction(input, expectedRevision, user) {
     const record = input.transaction;
     const items = Array.isArray(input.items) ? input.items : [];
     if (!record.id || Number(record.userId) !== Number(user.id) || record.type !== type || !items.length) throw stateError("Transaksi tidak valid.");
+    if (current.transactions.some((row) => String(row.id) === String(record.id))) throw stateError("Transaksi sudah tersimpan.");
     const locations = new Set();
     const stockChanges = new Map();
     for (const item of items) {
@@ -773,7 +775,9 @@ async function writeTransaction(input, expectedRevision, user) {
       locations.add(locationId);
       const key = `${product.id}:${locationId}`;
       const currentStock = current.productStocks.find((row) => row.productId === product.id && row.locationId === locationId);
-      const nextQuantity = Number(currentStock?.quantity || 0) + (operation === "inbound" ? quantity : -quantity);
+      if (!currentStock) throw stateError("Baris stok produk tidak ditemukan.");
+      const existingChange = stockChanges.get(key);
+      const nextQuantity = Number(existingChange?.quantity ?? currentStock?.quantity ?? 0) + (operation === "inbound" ? quantity : -quantity);
       if (nextQuantity < 0) throw stateError("Stok lokasi tidak cukup.");
       stockChanges.set(key, { productId: product.id, locationId, quantity: nextQuantity });
     }
@@ -783,7 +787,7 @@ async function writeTransaction(input, expectedRevision, user) {
     if (source !== (locations.size === 1 ? [...locations][0] : null)) throw stateError("Lokasi asal transaksi tidak valid.");
     const statements = [
       { sql: "INSERT INTO transactions (id, type, user_id, source_location_id, dest_location_id, created_at) VALUES (?, ?, ?, ?, ?, ?)", args: [record.id, type, user.id, source, record.destLocationId ?? null, record.createdAt] },
-      ...items.map((item, index) => ({ sql: "INSERT INTO transaction_items (id, transaction_id, product_id, location_id, quantity) VALUES (?, ?, ?, ?, ?)", args: [item.id || Date.now() + index, record.id, item.productId, operation === "inbound" ? current.products.find((row) => row.id === Number(item.productId)).locationId : item.locationId, item.quantity] })),
+      ...items.map((item, index) => ({ sql: "INSERT INTO transaction_items (id, transaction_id, product_id, location_id, quantity) VALUES (?, ?, ?, ?, ?)", args: [nextItemId + index, record.id, item.productId, operation === "inbound" ? current.products.find((row) => row.id === Number(item.productId)).locationId : item.locationId, item.quantity] })),
       ...[...stockChanges.values()].map((stock) => ({ sql: "UPDATE product_stocks SET quantity = ? WHERE product_id = ? AND location_id = ?", args: [stock.quantity, stock.productId, stock.locationId] })),
       { sql: "UPDATE app_meta SET value = ? WHERE key = 'state_revision'", args: [current.revision + 1] },
     ];
