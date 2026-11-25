@@ -678,7 +678,6 @@ async function writeState(inputState, expectedRevision, operation, user) {
     assertStateRevision(expectedRevision, currentRevision);
     if (expectedRevision !== null) validateStateOperation(currentState, state, operation, user);
     const nextRevision = currentRevision + 1;
-    const nextItemId = Math.max(0, ...current.transactionItems.map((item) => Number(item.id) || 0)) + 1;
     const statements = [
       { sql: "DELETE FROM transaction_items", args: [] },
       { sql: "DELETE FROM purchase_items", args: [] },
@@ -762,7 +761,7 @@ async function writeTransaction(input, expectedRevision, user) {
     if (!["inbound", "outbound"].includes(operation)) throw stateError("Jenis transaksi tidak valid.");
     const record = input.transaction;
     const items = Array.isArray(input.items) ? input.items : [];
-    if (!record.id || Number(record.userId) !== Number(user.id) || record.type !== type || !items.length) throw stateError("Transaksi tidak valid.");
+    if (typeof record.id !== "string" || !record.id.trim() || record.type !== type || !items.length) throw stateError("Transaksi tidak valid.");
     if (current.transactions.some((row) => String(row.id) === String(record.id))) throw stateError("Transaksi sudah tersimpan.");
     const locations = new Set();
     const stockChanges = new Map();
@@ -771,7 +770,7 @@ async function writeTransaction(input, expectedRevision, user) {
       const locationId = operation === "inbound" ? Number(product?.locationId) : Number(item.locationId);
       const location = current.locations.find((row) => row.id === locationId);
       const quantity = Number(item.quantity);
-      if (!product || location?.type !== "STORAGE" || quantity <= 0 || (operation === "outbound" && Number(product.locationId) !== locationId)) throw stateError("Item transaksi tidak valid.");
+      if (!Number.isInteger(quantity) || quantity <= 0 || !product || location?.type !== "STORAGE" || (operation === "outbound" && Number(product.locationId) !== locationId)) throw stateError("Item transaksi tidak valid.");
       locations.add(locationId);
       const key = `${product.id}:${locationId}`;
       const currentStock = current.productStocks.find((row) => row.productId === product.id && row.locationId === locationId);
@@ -784,9 +783,13 @@ async function writeTransaction(input, expectedRevision, user) {
     if (operation === "inbound" && record.destLocationId != null) throw stateError("Tujuan inbound harus kosong.");
     if (operation === "outbound" && current.locations.find((row) => row.id === Number(record.destLocationId))?.type !== "DESTINATION") throw stateError("Tujuan transaksi tidak valid.");
     const source = record.sourceLocationId == null ? null : Number(record.sourceLocationId);
+    if (source !== null && !Number.isInteger(source)) throw stateError("Lokasi asal transaksi tidak valid.");
+    const destinationId = record.destLocationId == null ? null : Number(record.destLocationId);
+    if (destinationId !== null && !Number.isInteger(destinationId)) throw stateError("Tujuan transaksi tidak valid.");
     if (source !== (locations.size === 1 ? [...locations][0] : null)) throw stateError("Lokasi asal transaksi tidak valid.");
+    const nextItemId = Math.max(0, ...current.transactionItems.map((item) => Number(item.id) || 0)) + 1;
     const statements = [
-      { sql: "INSERT INTO transactions (id, type, user_id, source_location_id, dest_location_id, created_at) VALUES (?, ?, ?, ?, ?, ?)", args: [record.id, type, user.id, source, record.destLocationId ?? null, record.createdAt] },
+      { sql: "INSERT INTO transactions (id, type, user_id, source_location_id, dest_location_id, created_at) VALUES (?, ?, ?, ?, ?, ?)", args: [record.id, type, user.id, source, destinationId, new Date().toISOString()] },
       ...items.map((item, index) => ({ sql: "INSERT INTO transaction_items (id, transaction_id, product_id, location_id, quantity) VALUES (?, ?, ?, ?, ?)", args: [nextItemId + index, record.id, item.productId, operation === "inbound" ? current.products.find((row) => row.id === Number(item.productId)).locationId : item.locationId, item.quantity] })),
       ...[...stockChanges.values()].map((stock) => ({ sql: "UPDATE product_stocks SET quantity = ? WHERE product_id = ? AND location_id = ?", args: [stock.quantity, stock.productId, stock.locationId] })),
       { sql: "UPDATE app_meta SET value = ? WHERE key = 'state_revision'", args: [current.revision + 1] },
